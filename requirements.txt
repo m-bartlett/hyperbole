@@ -1,0 +1,10 @@
+jupyterlab
+pandas
+numpy
+jupyter
+matplotlib
+ipympl
+plotly
+hyperbolic
+drawSvg
+ipywidgets
