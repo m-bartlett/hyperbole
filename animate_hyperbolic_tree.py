@@ -6,11 +6,15 @@ from math import cos, sin, sqrt, pi
 import colorsys
 import time
 import concurrent.futures
+import argparse
+import pathlib
+import sys
+import subprocess
 
 FPS = 30
 DURATION = 4
-FRAMES = FPS * DURATION
-WIDTH = 250
+FRAMES = 0
+WIDTH = 100
 
 DEFAULT_FRAME = {
     "p": 2,
@@ -28,14 +32,16 @@ DEFAULT_FRAME = {
 KEYFRAMES = [
     {"t": 0,    "p": 2, "q": 3.2, "r": 5.35, "v0_tolerance": 0.05, "max_iterations":1},
     {"t": 5,    "p": 2, "q": 3.2, "r": 20,   "max_iterations":1},
-    {"t": 100,  "p": 2, "q": 2.6, "r": 100,  "v0_tolerance": 0.15, "max_iterations":500},
+    {"t": 100,  "p": 2, "q": 2.6, "r": 100,  "v0_tolerance": 0.15, "max_iterations":100},
 ]
 
 KEYFRAMES[0] = {**DEFAULT_FRAME, **KEYFRAMES[0]}
 
-TIMELINE = [{**KEYFRAMES[0]} for f in range(FRAMES)]
+TIMELINE = []
 VARIABLE_TIMELINES = {}
-IMAGE_RANGE = numpy.linspace(-1.0, 1.0, WIDTH)
+IMAGE_RANGE = []
+OUTPUT_FORMAT = '%04d.png'
+OUTPUT_DIR = pathlib.Path()
 
 
 
@@ -66,15 +72,15 @@ def color_depth(rgb, depth):
     # s = hsv[1]
     # v = hsv[2]*depth
     # rgb_new = tuple(map(int, colorsys.hsv_to_rgb(h,s,v)))
-    # # return  rgb + (round(depth*255),)
-    # return  rgb_new
     
-    hls = colorsys.rgb_to_hls(*rgb)
-    h = hls[0]
-    l = hls[1]*depth
-    s = hls[2]
-    rgb_new = tuple(map(int, colorsys.hls_to_rgb(h,l,s)))
-    # return  rgb + (round(depth*255),)
+    # hls = colorsys.rgb_to_hls(*rgb)
+    # h = hls[0]
+    # l = hls[1]*depth
+    # s = hls[2]
+    # rgb_new = tuple(map(int, colorsys.hls_to_rgb(h,l,s)))
+
+    rgb_new = (*rgb, round(depth*255))
+
     return  rgb_new
 
 
@@ -137,7 +143,7 @@ def draw(pqr, width, image_range, max_iterations, vcolors, vtolerances):
                 else:
                     clean += 1
                     if clean >= 3:
-                        #if dot(p,critplane) > 1: return (255,128,0,255)
+                        # if numpy.dot(p,critplane) > 1: return 1, attempts
                         if attempts > max_attempts: max_attempts = attempts
                         
                         v0_tolerance = vtolerances[0]
@@ -153,7 +159,7 @@ def draw(pqr, width, image_range, max_iterations, vcolors, vtolerances):
 
     im_data = [colorize(x,y) for y in image_range for x in image_range]
     
-    depth_map = numpy.apply_along_axis(lambda i:1-(i/max_attempts), arr=range(max_attempts+1), axis=0)**2
+    depth_map = (1 - (numpy.array(range(max_attempts+1)) / max_attempts)) ** 2
     
     for i, colorization in enumerate(im_data):
         index, attempts = colorization
@@ -165,41 +171,6 @@ def draw(pqr, width, image_range, max_iterations, vcolors, vtolerances):
     im = Image.new("RGBA", (width, width) )
     im.putdata(im_data)
     return im
-
-
-
-for frame in KEYFRAMES:
-    t = frame.pop("t")
-    for k,v in frame.items():
-        timeline = VARIABLE_TIMELINES.get(k,[])
-        ramp = {"t":t, k:v}
-        timeline.append(ramp)
-        VARIABLE_TIMELINES[k] = timeline
-
-
-for variable, keyframes in VARIABLE_TIMELINES.items():
-    ramp_iter = iter(VARIABLE_TIMELINES[variable])
-    ramp = next(ramp_iter)
-
-
-    while True:
-        try: ramp_next = next(ramp_iter)
-        except StopIteration: break
-        t = ramp.pop("t")
-        frame_start = round(t * FRAMES // 100)
-        frame_end = round(ramp_next['t'] * FRAMES // 100)
-        frame_duration = round(frame_end - frame_start)
-        unit_duration = numpy.linspace(0, 1, frame_duration)
-        ramp_over_frames = numpy.apply_along_axis(easeinout, arr=unit_duration[:,numpy.newaxis], axis=1).flatten()
-        for k,v in ramp.items():
-            v_start = v
-            v_end = ramp_next[k]
-            v_delta = v_end - v_start
-            variable_ramp_over_frames = ramp_over_frames * v_delta + v_start
-            for f,f0 in zip(range(frame_start, frame_end), range(frame_duration)):
-                TIMELINE[f][k] = variable_ramp_over_frames[f0]
-        ramp = ramp_next
-
 
 
 def render(frame, index):
@@ -219,18 +190,126 @@ def render(frame, index):
     v2_color = frame.get("v2_color")
     vcolors = [v0_color, v1_color, v2_color]
     
-    frame_file = f"{index}.png"
     im = draw(pqr, WIDTH, IMAGE_RANGE, max_iterations, vcolors, vtolerances)
-    im.save(frame_file)
+    im.save(f"{OUTPUT_DIR}/{OUTPUT_FORMAT % index}")
     return index
 
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--fps', '-F',
+                        type=int,
+                        default=30,
+                        help="Frames to render per second of DURATION.")
+    parser.add_argument('--duration', '-D',
+                        type=float,
+                        default=4.0,
+                        help="Total length in seconds of the resulting animation.")
+    parser.add_argument('--width', '-W',
+                        type=int,
+                        default=100,
+                        help="Width in pixels of the frames to be rendered.")
+    parser.add_argument('--height', '-H',
+                        type=int,
+                        help="""Height in pixels of the frames to be rendered.
+                                (Default height matches width for a square output).""")
+    parser.add_argument('--output-dir', '-d',
+                        type=str,
+                        default='.',
+                        help="Directory in which to output rendered images. Defaults to $PWD.")
+    parser.add_argument('--output-format', '-f',
+                        type=str,
+                        default='%04d.png',
+                        help="""Formattable file-name for rendered images. The frame's index will
+                                be supplied as a formatting argument to this string, e.g. a value
+                                of '%%04d.png' would cause the first frame to be saved as 
+                                '0001.png', etc. Defaults to %%04d.png""")
+    parser.add_argument('--ffmpeg',
+                        nargs='?',
+                        type=str,
+                        const='render.mp4',
+                        help="""Calls `ffmpeg` to encode the rendered frames as a video file using 
+                                the same parameters given for the frame synthesis. If an argument
+                                value is provided, it will be used as the resulting video file
+                                name. This can be used specify the video format. Defaults to
+                                'render.mp4'. \033[1mThe `ffmpeg` executable must be available in
+                                $PATH.\033[0m""")
+    args = parser.parse_args()
+
+    FPS = args.fps
+    DURATION = args.duration
+    FRAMES = round(FPS * DURATION)
+    WIDTH = args.width
+    HEIGHT = args.height or WIDTH
+    # WIDTH_RANGE = numpy.linspace(-1.0, 1.0, WIDTH)
+    # HEIGHT_RANGE = numpy.linspace(-1.0, 1.0, WIDTH)
+    IMAGE_RANGE = numpy.linspace(-1.0, 1.0, WIDTH)
+    TIMELINE = [{**KEYFRAMES[0]} for f in range(FRAMES)]
+
+
+    OUTPUT_DIR = pathlib.Path(args.output_dir or '').resolve()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    OUTPUT_FORMAT = args.output_format
+
+    print(f"{FRAMES} of {WIDTH}x{HEIGHT} frames over {DURATION} seconds ({FPS}fps) -> {OUTPUT_DIR}/{OUTPUT_FORMAT}")
+
+
+    for frame in KEYFRAMES:
+        t = frame.pop("t")
+        for k,v in frame.items():
+            timeline = VARIABLE_TIMELINES.get(k,[])
+            ramp = {"t":t, k:v}
+            timeline.append(ramp)
+            VARIABLE_TIMELINES[k] = timeline
+
+
+    for variable, keyframes in VARIABLE_TIMELINES.items():
+        ramp_iter = iter(VARIABLE_TIMELINES[variable])
+        ramp = next(ramp_iter)
+
+
+        while True:
+            try: ramp_next = next(ramp_iter)
+            except StopIteration: break
+            t = ramp.pop("t")
+            frame_start = round(t * FRAMES // 100)
+            frame_end = round(ramp_next['t'] * FRAMES // 100)
+            frame_duration = round(frame_end - frame_start)
+            unit_duration = numpy.linspace(0, 1, frame_duration)
+            ramp_over_frames = numpy.apply_along_axis(easeinout, arr=unit_duration[:,numpy.newaxis], axis=1).flatten()
+            for k,v in ramp.items():
+                v_start = v
+                v_end = ramp_next[k]
+                v_delta = v_end - v_start
+                variable_ramp_over_frames = ramp_over_frames * v_delta + v_start
+                for f,f0 in zip(range(frame_start, frame_end), range(frame_duration)):
+                    TIMELINE[f][k] = variable_ramp_over_frames[f0]
+            ramp = ramp_next
+
+
+    print(f"{0} / {FRAMES}", end='\r')
     with concurrent.futures.ProcessPoolExecutor(max_workers=4) as pool:
         jobs = concurrent.futures.as_completed(pool.submit(render, frame, frame_index)
                                                for frame_index, frame in enumerate(TIMELINE))
-
         for future in jobs:
-            index = future.result()
-            print(f"{index+1} / {FRAMES}", end='\r')
-    print("Complete")
+            try:
+                index = future.result()
+                print(f"{index+1} / {FRAMES}", end='\r')
+                sys.stdout.flush()
+            except FloatingPointError:
+                sys.exit(1)
+    print("\033[2KComplete")
+
+
+    if args.ffmpeg:
+        status, ffmpeg_path = subprocess.getstatusoutput('command -v ffmpeg')
+        if status != 0:
+            raise FileNotFoundError(f"Could not find `ffmpeg` executable in $PATH.")
+        ffmpeg_command = (f"{ffmpeg_path} -y"
+                          f" -framerate {FPS} -r {FPS}"
+                          f" -i {OUTPUT_DIR}/{OUTPUT_FORMAT}"
+                          f" -- {OUTPUT_DIR}/{args.ffmpeg}")
+        print(ffmpeg_command)
+        print(subprocess.getoutput(ffmpeg_command))
