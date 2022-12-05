@@ -10,11 +10,13 @@ import argparse
 import pathlib
 import sys
 import subprocess
+import math
 
 FPS = 30
 DURATION = 4
 FRAMES = 0
 WIDTH = 100
+WIDTH_2 = 50
 
 DEFAULT_FRAME = {
     "p": 2,
@@ -32,7 +34,7 @@ DEFAULT_FRAME = {
 KEYFRAMES = [
     {"t": 0,    "p": 2, "q": 3.2, "r": 5.35, "v0_tolerance": 0.05, "max_iterations":1},
     {"t": 5,    "p": 2, "q": 3.2, "r": 20,   "max_iterations":1},
-    {"t": 100,  "p": 2, "q": 2.6, "r": 100,  "v0_tolerance": 0.15, "max_iterations":100},
+    {"t": 100,  "p": 2, "q": 2.6, "r": 1000,  "v0_tolerance": 0.15, "max_iterations":500},
 ]
 
 KEYFRAMES[0] = {**DEFAULT_FRAME, **KEYFRAMES[0]}
@@ -66,25 +68,28 @@ def easeinout(t: float) -> float:
     return (-2 * t * t) + (4 * t) - 1
 
 
-def color_depth(rgb, depth):
-    # hsv = colorsys.rgb_to_hsv(*rgb)
-    # h = hsv[0]
-    # s = hsv[1]
-    # v = hsv[2]*depth
-    # rgb_new = tuple(map(int, colorsys.hsv_to_rgb(h,s,v)))
-    
+def color_depth(rgb, depth, accuracy):
+
+    hsv = colorsys.rgb_to_hsv(*rgb)
+    h = hsv[0]
+    s = hsv[1]*depth
+    v = hsv[2]*depth
+    rgb_new = tuple(map(int, colorsys.hsv_to_rgb(h,s,v)))
+    # rgb_new = (*rgb_new, round(accuracy*255))
+
     # hls = colorsys.rgb_to_hls(*rgb)
     # h = hls[0]
     # l = hls[1]*depth
-    # s = hls[2]
+    # s = hls[2]*depth
     # rgb_new = tuple(map(int, colorsys.hls_to_rgb(h,l,s)))
+    # rgb_new = (*rgb_new, round(accuracy*255))
 
-    rgb_new = (*rgb, round(depth*255))
+    # rgb_new = (*rgb, round(depth*255))
 
-    return  rgb_new
+    return rgb_new
 
 
-def draw(pqr, width, image_range, max_iterations, vcolors, vtolerances):
+def draw(pqr, max_iterations, vcolors, vtolerances):
     if not pqr:     # all pairs are asymptotic
         ir3 = 1/sqrt(3)
         mirror = [numpy.array([1j*ir3, 2*ir3, 0]),
@@ -122,21 +127,23 @@ def draw(pqr, width, image_range, max_iterations, vcolors, vtolerances):
     vertex = numpy.linalg.solve(numpy.array(mirror), numpy.array([1,0,1]))
     critplane = 1j*numpy.cross(vertex,v2)
 
-    max_attempts = 0
+    depth_map = (1 - (numpy.array(range(max_iterations+1)) / max_iterations)) ** 2
+
     
-    def colorize(x0,x1):
-        nonlocal max_attempts
-        r2 = x0**2 + x1**2
-        if r2 >= 1: return -1, 0
+    def render_pixel(x, y):
+        nonlocal max_iterations, depth_map
+
+        r2 = x**2 + y**2
+        if r2 >= 1:
+            return (0,0,0,0)
 
         bottom = 1-r2
-        p = numpy.array([ 1j*(1+r2)/bottom, 2*x0/bottom, 2*x1/bottom ])
+        p = numpy.array([ 1j*(1+r2)/bottom, 2*x/bottom, 2*y/bottom ])
 
         clean = 0
-        attempts = 0
-        for attempt in range(max_iterations):
+        for iteration in range(max_iterations):
             for j,u in enumerate(mirror):
-                attempts += 1
+                # attempts += 1
                 if numpy.dot(p,u) > 0:
                     p = refl(p,u)
                     clean = 0
@@ -144,31 +151,22 @@ def draw(pqr, width, image_range, max_iterations, vcolors, vtolerances):
                     clean += 1
                     if clean >= 3:
                         # if numpy.dot(p,critplane) > 1: return 1, attempts
-                        if attempts > max_attempts: max_attempts = attempts
+                        # if attempts > max_attempts: max_attempts = attempts
                         
                         v0_tolerance = vtolerances[0]
                         v0_dot = abs(numpy.dot(p,v0))
                         if v0_dot < v0_tolerance:
-                           # ((v0_tolerance-v0_dot)/v0_tolerance)**2 )
-                            return 0, attempts
-                        # if abs(numpy.dot(p,v1)) < vtolerances[1]:  return 1, attempts
-                        # if abs(numpy.dot(p,v2)) < vtolerances[2]:  return 2, attempts
-                        return -1, attempts
-        return -1, attempts
+                            depth = depth_map[iteration]
+                            accuracy = ((v0_tolerance-v0_dot)/v0_tolerance)**3
+                            return color_depth(vcolors[0], depth, accuracy)
+                        # if abs(numpy.dot(p,v1)) < vtolerances[1]:  return vcolors[1]
+                        # if abs(numpy.dot(p,v2)) < vtolerances[2]:  return vcolors[2]
+                        return (0,0,0,0)
+        return (0,0,0,0)
     
 
-    im_data = [colorize(x,y) for y in image_range for x in image_range]
-    
-    depth_map = (1 - (numpy.array(range(max_attempts+1)) / max_attempts)) ** 2
-    
-    for i, colorization in enumerate(im_data):
-        index, attempts = colorization
-        if index < 0:
-            im_data[i] = (0,0,0,0)
-            continue
-        im_data[i] = color_depth(vcolors[index], depth_map[attempts])
-        
-    im = Image.new("RGBA", (width, width) )
+    im_data = [render_pixel(x,y) for y in IMAGE_RANGE for x in IMAGE_RANGE]
+    im = Image.new("RGBA", (WIDTH_2, WIDTH_2) )
     im.putdata(im_data)
     return im
 
@@ -190,8 +188,12 @@ def render(frame, index):
     v2_color = frame.get("v2_color")
     vcolors = [v0_color, v1_color, v2_color]
     
-    im = draw(pqr, WIDTH, IMAGE_RANGE, max_iterations, vcolors, vtolerances)
-    im.save(f"{OUTPUT_DIR}/{OUTPUT_FORMAT % index}")
+    quad = draw(pqr, max_iterations, vcolors, vtolerances)
+    image = Image.new("RGBA", (WIDTH, WIDTH))
+    image.alpha_composite(quad, dest=(WIDTH_2,WIDTH_2))
+    image.alpha_composite(quad.transpose(Image.Transpose.FLIP_LEFT_RIGHT), dest=(0,WIDTH_2))
+    image.alpha_composite(image.transpose(Image.Transpose.FLIP_TOP_BOTTOM), dest=(0,0))
+    image.save(f"{OUTPUT_DIR}/{OUTPUT_FORMAT % index}")
     return index
 
 
@@ -247,10 +249,11 @@ if __name__ == "__main__":
     DURATION = args.duration
     FRAMES = round(FPS * DURATION)
     WIDTH = args.width
+    WIDTH_2 = WIDTH // 2
     HEIGHT = args.height or WIDTH
     # WIDTH_RANGE = numpy.linspace(-1.0, 1.0, WIDTH)
     # HEIGHT_RANGE = numpy.linspace(-1.0, 1.0, WIDTH)
-    IMAGE_RANGE = numpy.linspace(-1.0, 1.0, WIDTH)
+    IMAGE_RANGE = numpy.linspace(0, 1.0, WIDTH_2)
     TIMELINE = [{**KEYFRAMES[0]} for f in range(FRAMES)]
 
 
@@ -260,7 +263,7 @@ if __name__ == "__main__":
     OUTPUT_FORMAT = args.output_format
 
     print(f"Rendering {FRAMES} of {WIDTH}x{HEIGHT} frames over {DURATION} seconds ({FPS}fps) with"
-          f" {args.procs} concurrent renderers\n => {OUTPUT_DIR}/{OUTPUT_FORMAT}")
+          f" {args.procs} concurrent renderers\n  ==> {OUTPUT_DIR}/{OUTPUT_FORMAT}")
 
 
     for frame in KEYFRAMES:
@@ -281,9 +284,9 @@ if __name__ == "__main__":
             try: ramp_next = next(ramp_iter)
             except StopIteration: break
             t = ramp.pop("t")
-            frame_start = round(t * FRAMES // 100)
-            frame_end = round(ramp_next['t'] * FRAMES // 100)
-            frame_duration = round(frame_end - frame_start)
+            frame_start = math.floor(t * FRAMES / 100)
+            frame_end = math.ceil(ramp_next['t'] * FRAMES / 100)
+            frame_duration = frame_end - frame_start
             unit_duration = numpy.linspace(0, 1, frame_duration)
             ramp_over_frames = numpy.apply_along_axis(easeinout, arr=unit_duration[:,numpy.newaxis], axis=1).flatten()
             for k,v in ramp.items():
@@ -295,18 +298,14 @@ if __name__ == "__main__":
                     TIMELINE[f][k] = variable_ramp_over_frames[f0]
             ramp = ramp_next
 
-
     print(f"{0} / {FRAMES}", end='\r')
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.procs) as pool:
         jobs = concurrent.futures.as_completed(pool.submit(render, frame, frame_index)
                                                for frame_index, frame in enumerate(TIMELINE))
         for future in jobs:
-            try:
-                index = future.result()
-                print(f"{index+1} / {FRAMES}", end='\r')
-                sys.stdout.flush()
-            except FloatingPointError:
-                sys.exit(1)
+            index = future.result()
+            print(f"{index+1} / {FRAMES}", end='\r')
+            sys.stdout.flush()
     print("\033[2KComplete")
 
 
