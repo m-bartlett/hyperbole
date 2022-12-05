@@ -225,6 +225,12 @@ if __name__ == "__main__":
                                 be supplied as a formatting argument to this string, e.g. a value
                                 of '%%04d.png' would cause the first frame to be saved as 
                                 '0001.png', etc. Defaults to %%04d.png""")
+    parser.add_argument('--procs', '-P',
+                        type=int,
+                        default=4,
+                        help="""Number of concurrent processes to launch. Each process renders a
+                                single frame. It's recommended to keep this value less than or
+                                equal to the number of cores your machine's CPU has.""")
     parser.add_argument('--ffmpeg',
                         nargs='?',
                         type=str,
@@ -253,7 +259,8 @@ if __name__ == "__main__":
 
     OUTPUT_FORMAT = args.output_format
 
-    print(f"{FRAMES} of {WIDTH}x{HEIGHT} frames over {DURATION} seconds ({FPS}fps) -> {OUTPUT_DIR}/{OUTPUT_FORMAT}")
+    print(f"Rendering {FRAMES} of {WIDTH}x{HEIGHT} frames over {DURATION} seconds ({FPS}fps) with"
+          f" {args.procs} concurrent renderers\n => {OUTPUT_DIR}/{OUTPUT_FORMAT}")
 
 
     for frame in KEYFRAMES:
@@ -290,7 +297,7 @@ if __name__ == "__main__":
 
 
     print(f"{0} / {FRAMES}", end='\r')
-    with concurrent.futures.ProcessPoolExecutor(max_workers=4) as pool:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=args.procs) as pool:
         jobs = concurrent.futures.as_completed(pool.submit(render, frame, frame_index)
                                                for frame_index, frame in enumerate(TIMELINE))
         for future in jobs:
