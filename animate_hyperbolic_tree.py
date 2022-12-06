@@ -12,6 +12,10 @@ import sys
 import subprocess
 import math
 
+PRIMARY_COLOR = [52, 94, 183]
+BACKGROUND_COLOR = (255,255,255,255)
+TRANSPARENT = (0,0,0,0)
+
 FPS = 30
 DURATION = 4
 FRAMES = 0
@@ -22,9 +26,9 @@ DEFAULT_FRAME = {
     "p": 2,
     "q": 3.2,
     "r": 0,
-    "v0_color": (52, 94, 183),
-    "v1_color": (52, 94, 183),
-    "v2_color": (52, 94, 183),
+    "v0_color": PRIMARY_COLOR,
+    "v1_color": PRIMARY_COLOR,
+    "v2_color": PRIMARY_COLOR,
     "v0_tolerance": 0.05,
     "v1_tolerance": 0.01,
     "v2_tolerance": 0.01,
@@ -32,9 +36,12 @@ DEFAULT_FRAME = {
 }
 
 KEYFRAMES = [
-    {"t": 0,    "p": 2, "q": 3.2, "r": 5.35, "v0_tolerance": 0.05, "max_iterations":1},
-    {"t": 5,    "p": 2, "q": 3.2, "r": 20,   "max_iterations":1},
-    {"t": 100,  "p": 2, "q": 2.6, "r": 1000,  "v0_tolerance": 0.15, "max_iterations":500},
+    {"t": 0,  "p": 2, "q": 2.1, "r": 35, "v0_tolerance": 0, "max_iterations": 1},
+    # {"t": 5,  "q": 2.1, "r": 35, "v0_tolerance": 0.001, "max_iterations": 10},
+    {"t": 25,  "v0_tolerance": 0.01, "max_iterations": 20},
+    {"t": 75, "q": 2.55, "r": 1000, "v0_tolerance": 0.2, "max_iterations": 500},
+    {"t": 95, "q": 2.75, "r": 1000, "v0_tolerance": 0, "max_iterations": 100},
+    {"t": 100, "p": 2, "q": 2.75, "r": 1000, "v0_tolerance": 0, "max_iterations": 1},
 ]
 
 KEYFRAMES[0] = {**DEFAULT_FRAME, **KEYFRAMES[0]}
@@ -70,12 +77,12 @@ def easeinout(t: float) -> float:
 
 def color_depth(rgb, depth, accuracy):
 
-    hsv = colorsys.rgb_to_hsv(*rgb)
-    h = hsv[0]
-    s = hsv[1]*depth
-    v = hsv[2]*depth
-    rgb_new = tuple(map(int, colorsys.hsv_to_rgb(h,s,v)))
-    # rgb_new = (*rgb_new, round(accuracy*255))
+    h, s, v = colorsys.rgb_to_hsv(*rgb)
+    h = h
+    s = s*depth
+    v = v*depth
+    r,g,b = colorsys.hsv_to_rgb(h,s,v)
+    a = depth*255*accuracy
 
     # hls = colorsys.rgb_to_hls(*rgb)
     # h = hls[0]
@@ -86,7 +93,7 @@ def color_depth(rgb, depth, accuracy):
 
     # rgb_new = (*rgb, round(depth*255))
 
-    return rgb_new
+    return tuple(map(int, [r,g,b,a]))
 
 
 def draw(pqr, max_iterations, vcolors, vtolerances):
@@ -111,15 +118,15 @@ def draw(pqr, max_iterations, vcolors, vtolerances):
         v2 = [ 1j*sqrt(abs(1-v21**2-v22**2)), v21, v22 ]
         mirror = [ numpy.array(v0), numpy.array(v1), numpy.array(v2) ]
 
-        # Move everything so that the origin is equidistant from the mirror.
-
-        #omnipoint = unit(solve(array(mirror), array([-1,-1,-1])))
-        #if omnipoint[0].imag < 0: omnipoint = -omnipoint
-        #tempmirror = unit(omnipoint - array([1j,0,0]))
-        #for j,u in enumerate(mirror):
-            #v = refl(u,tempmirror)
-            #if v[0].imag <0: v = -v
-            #mirror[j] = v
+        # ## Move everything so that the origin is equidistant from the mirror.
+        # omnipoint = unit(numpy.linalg.solve(numpy.array(mirror), numpy.array([-1,-1,-1])))
+        # if omnipoint[0].imag < 0:
+        #     omnipoint = -omnipoint
+        # tempmirror = unit(omnipoint - numpy.array([1j,0,0]))
+        # for j,u in enumerate(mirror):
+        #     v = refl(u,tempmirror)
+        #     if v[0].imag <0: v = -v
+        #     mirror[j] = v
 
     v0,v1,v2 = mirror
     
@@ -135,7 +142,7 @@ def draw(pqr, max_iterations, vcolors, vtolerances):
 
         r2 = x**2 + y**2
         if r2 >= 1:
-            return (0,0,0,0)
+            return TRANSPARENT
 
         bottom = 1-r2
         p = numpy.array([ 1j*(1+r2)/bottom, 2*x/bottom, 2*y/bottom ])
@@ -157,12 +164,12 @@ def draw(pqr, max_iterations, vcolors, vtolerances):
                         v0_dot = abs(numpy.dot(p,v0))
                         if v0_dot < v0_tolerance:
                             depth = depth_map[iteration]
-                            accuracy = ((v0_tolerance-v0_dot)/v0_tolerance)**3
+                            accuracy = ((v0_tolerance-v0_dot)/v0_tolerance)**(1/3)
                             return color_depth(vcolors[0], depth, accuracy)
                         # if abs(numpy.dot(p,v1)) < vtolerances[1]:  return vcolors[1]
                         # if abs(numpy.dot(p,v2)) < vtolerances[2]:  return vcolors[2]
-                        return (0,0,0,0)
-        return (0,0,0,0)
+                        return TRANSPARENT
+        return TRANSPARENT
     
 
     im_data = [render_pixel(x,y) for y in IMAGE_RANGE for x in IMAGE_RANGE]
@@ -183,9 +190,9 @@ def render(frame, index):
     v2_tolerance = frame.get('v2_tolerance')
     vtolerances = [v0_tolerance, v1_tolerance, v2_tolerance]
 
-    v0_color = frame.get("v0_color")
-    v1_color = frame.get("v1_color")
-    v2_color = frame.get("v2_color")
+    v0_color = numpy.uint8(frame.get("v0_color"))
+    v1_color = numpy.uint8(frame.get("v1_color"))
+    v2_color = numpy.uint8(frame.get("v2_color"))
     vcolors = [v0_color, v1_color, v2_color]
     
     quad = draw(pqr, max_iterations, vcolors, vtolerances)
@@ -193,7 +200,9 @@ def render(frame, index):
     image.alpha_composite(quad, dest=(WIDTH_2,WIDTH_2))
     image.alpha_composite(quad.transpose(Image.Transpose.FLIP_LEFT_RIGHT), dest=(0,WIDTH_2))
     image.alpha_composite(image.transpose(Image.Transpose.FLIP_TOP_BOTTOM), dest=(0,0))
-    image.save(f"{OUTPUT_DIR}/{OUTPUT_FORMAT % index}")
+    background = Image.new("RGBA", (WIDTH, WIDTH), BACKGROUND_COLOR)
+    background.alpha_composite(image)
+    background.save(f"{OUTPUT_DIR}/{OUTPUT_FORMAT % index}")
     return index
 
 
@@ -212,10 +221,6 @@ if __name__ == "__main__":
                         type=int,
                         default=100,
                         help="Width in pixels of the frames to be rendered.")
-    parser.add_argument('--height', '-H',
-                        type=int,
-                        help="""Height in pixels of the frames to be rendered.
-                                (Default height matches width for a square output).""")
     parser.add_argument('--output-dir', '-d',
                         type=str,
                         default='.',
@@ -227,6 +232,9 @@ if __name__ == "__main__":
                                 be supplied as a formatting argument to this string, e.g. a value
                                 of '%%04d.png' would cause the first frame to be saved as 
                                 '0001.png', etc. Defaults to %%04d.png""")
+    parser.add_argument('--clear-output-dir', '-R',
+                        action='store_true',
+                        help="Delete all files in the output directory before generating frames.")
     parser.add_argument('--procs', '-P',
                         type=int,
                         default=4,
@@ -250,19 +258,20 @@ if __name__ == "__main__":
     FRAMES = round(FPS * DURATION)
     WIDTH = args.width
     WIDTH_2 = WIDTH // 2
-    HEIGHT = args.height or WIDTH
     # WIDTH_RANGE = numpy.linspace(-1.0, 1.0, WIDTH)
-    # HEIGHT_RANGE = numpy.linspace(-1.0, 1.0, WIDTH)
     IMAGE_RANGE = numpy.linspace(0, 1.0, WIDTH_2)
     TIMELINE = [{**KEYFRAMES[0]} for f in range(FRAMES)]
 
 
     OUTPUT_DIR = pathlib.Path(args.output_dir or '').resolve()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if args.clear_output_dir:
+        for i in OUTPUT_DIR.iterdir():
+            i.unlink()
 
     OUTPUT_FORMAT = args.output_format
 
-    print(f"Rendering {FRAMES} of {WIDTH}x{HEIGHT} frames over {DURATION} seconds ({FPS}fps) with"
+    print(f"Rendering {FRAMES} of {WIDTH}x{WIDTH} frames over {DURATION} seconds ({FPS}fps, {WIDTH*WIDTH*FRAMES} pixels) with"
           f" {args.procs} concurrent renderers\n  ==> {OUTPUT_DIR}/{OUTPUT_FORMAT}")
 
 
@@ -292,8 +301,14 @@ if __name__ == "__main__":
             for k,v in ramp.items():
                 v_start = v
                 v_end = ramp_next[k]
-                v_delta = v_end - v_start
-                variable_ramp_over_frames = ramp_over_frames * v_delta + v_start
+                try:
+                    v_delta = v_end - v_start
+                    variable_ramp_over_frames = ramp_over_frames * v_delta + v_start
+                except TypeError:
+                    v_start = numpy.uint8(v_start)
+                    v_end = numpy.uint8(v_end)
+                    v_delta = v_end - v_start
+                    variable_ramp_over_frames = ramp_over_frames[:,numpy.newaxis]*v_delta + v_start
                 for f,f0 in zip(range(frame_start, frame_end), range(frame_duration)):
                     TIMELINE[f][k] = variable_ramp_over_frames[f0]
             ramp = ramp_next
