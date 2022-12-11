@@ -39,9 +39,9 @@ KEYFRAMES = [
     {"t": 0,  "p": 2, "q": 2.1, "r": 35, "v0_tolerance": 0, "max_iterations": 1},
     # {"t": 5,  "q": 2.1, "r": 35, "v0_tolerance": 0.001, "max_iterations": 10},
     {"t": 25,  "v0_tolerance": 0.01, "max_iterations": 20},
-    {"t": 75, "q": 2.55, "r": 1000, "v0_tolerance": 0.2, "max_iterations": 500},
-    {"t": 95, "q": 2.75, "r": 1000, "v0_tolerance": 0, "max_iterations": 100},
-    {"t": 100, "p": 2, "q": 2.75, "r": 1000, "v0_tolerance": 0, "max_iterations": 1},
+    {"t": 75, "p": 2, "q": 2.55, "r": 1000, "v0_tolerance": 0.2, "max_iterations": 500},
+    {"t": 95, "p": 2, "q": 3.1, "r": 1000, "v0_tolerance": 0, "max_iterations": 100},
+    {"t": 100, "p": 2, "q": 3.1, "r": 1000, "v0_tolerance": 0, "max_iterations": 1},
 ]
 
 KEYFRAMES[0] = {**DEFAULT_FRAME, **KEYFRAMES[0]}
